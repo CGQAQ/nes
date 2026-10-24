@@ -1,0 +1,161 @@
+name: Release
+
+# Publishes desktop binaries to a GitHub Release.
+#
+# - Pushing a tag like `v0.2.0` builds every target and publishes the
+#   release. The tag must match the workspace version in Cargo.toml.
+# - Running the workflow by hand with an existing tag rebuilds it and
+#   replaces the release's assets (e.g. after a failed run).
+# - Pull requests that change this file build everything as a dry run and
+#   keep the archives as workflow artifacts, without publishing.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish (e.g. v0.1.0)
+        required: true
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - id: version
+        name: Work out the version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cargo_version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "$TAG" != "v$cargo_version" ]; then
+            echo "::error::Tag $TAG doesn't match the workspace version $cargo_version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # Cross-compiled on the Apple silicon runner.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          # Built on the oldest supported Ubuntu so the binaries run on
+          # distributions with older glibc too.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      # No build cache on purpose: release builds start clean.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Linux GUI/audio/gamepad dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev
+      - name: Build
+        env:
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: cargo build --release --locked --target ${{ matrix.target }} -p nes-app -p nes-cli
+      - name: Package
+        shell: bash
+        env:
+          NAME: nes-${{ needs.meta.outputs.version }}-${{ matrix.target }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          exe=""
+          if [ "$RUNNER_OS" = Windows ]; then exe=".exe"; fi
+          mkdir -p "dist/$NAME"
+          cp "target/$TARGET/release/nes$exe" "target/$TARGET/release/nes-cli$exe" "dist/$NAME/"
+          cp README.md LICENSE "dist/$NAME/"
+          cd dist
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a -tzip "$NAME.zip" "$NAME" > /dev/null
+          else
+            tar czf "$NAME.tar.gz" "$NAME"
+          fi
+          rm -r "$NAME"
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          retention-days: ${{ needs.meta.outputs.publish == 'true' && 30 || 7 }}
+          if-no-files-found: error
+
+  release:
+    needs: [meta, build]
+    if: needs.meta.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.version }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## Downloads
+
+          | Platform | File |
+          |---|---|
+          | Windows (x64) | `nes-{tag}-x86_64-pc-windows-msvc.zip` |
+          | macOS (Apple silicon) | `nes-{tag}-aarch64-apple-darwin.tar.gz` |
+          | macOS (Intel) | `nes-{tag}-x86_64-apple-darwin.tar.gz` |
+          | Linux (x64) | `nes-{tag}-x86_64-unknown-linux-gnu.tar.gz` |
+          | Linux (arm64) | `nes-{tag}-aarch64-unknown-linux-gnu.tar.gz` |
+
+          Each archive contains `nes` (the emulator and debugger) and `nes-cli` (the headless tools). Check downloads against `SHA256SUMS.txt`.
+
+          - **Windows / macOS:** the binaries aren't signed, so SmartScreen or Gatekeeper may warn on first launch. On macOS, right-click → Open, or run `xattr -d com.apple.quarantine nes nes-cli`.
+          - **Linux:** needs glibc 2.35+ (Ubuntu 22.04 or newer), ALSA, udev and X11 or Wayland, which desktop distributions ship by default. Open ROM uses the XDG desktop portal.
+          EOF
+          sed -i "s/{tag}/$TAG/g" notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "nes $TAG" --notes-file notes.md --generate-notes
+          fi
