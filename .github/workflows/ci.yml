@@ -26,7 +26,7 @@ jobs:
       - name: Fetch test ROMs
         shell: bash
         run: scripts/fetch-test-data.sh
-      - run: cargo test --workspace --release
+      - run: cargo test --workspace
 
   lint:
     runs-on: ubuntu-latest

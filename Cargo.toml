@@ -50,8 +50,8 @@ new_without_default = "allow"
 opt-level = 3
 
 [profile.release]
-lto = "thin"
-codegen-units = 4
+lto = "fat"
+codegen-units = 1
 
 [profile.test]
 opt-level = 1
