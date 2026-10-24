@@ -3,6 +3,7 @@
 
 mod app;
 mod audio;
+mod console;
 mod debugger;
 mod input;
 mod platform;
