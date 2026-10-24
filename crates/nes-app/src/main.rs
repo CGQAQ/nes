@@ -1,6 +1,12 @@
 //! NES emulator and debugger: desktop entry point (and the web entry point
 //! when built for wasm32).
 
+// Release builds on Windows are GUI apps: no console window behind them.
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 mod app;
 mod audio;
 mod console;
