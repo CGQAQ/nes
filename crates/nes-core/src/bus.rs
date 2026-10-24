@@ -375,17 +375,25 @@ impl Bus {
     }
 }
 
-impl CpuBus for Bus {
-    // Out of line on purpose: inlining the whole bus cycle into every
-    // access site of the CPU core bloats it and costs ~40% speed.
-    #[inline(never)]
-    fn read(&mut self, addr: u16) -> u8 {
+impl Bus {
+    #[inline(always)]
+    fn read_cycle(&mut self, addr: u16) -> u8 {
         if self.dma.need_halt {
             self.run_dma(addr);
         }
         self.start_cycle(true);
         let v = self.read_mem(addr);
         self.end_cycle(true);
+        v
+    }
+}
+
+impl CpuBus for Bus {
+    // Out of line on purpose: inlining the whole bus cycle into every
+    // access site of the CPU core bloats it and costs ~40% speed.
+    #[inline(never)]
+    fn read(&mut self, addr: u16) -> u8 {
+        let v = self.read_cycle(addr);
         if self.dbg.any_rw {
             self.dbg.check_read(addr, v);
         }
@@ -399,6 +407,13 @@ impl CpuBus for Bus {
             }
         }
         v
+    }
+
+    /// Same cycle as `read`, but invisible to read breakpoints and the
+    /// code/data logger (the value is discarded by the CPU).
+    #[inline(never)]
+    fn dummy_read(&mut self, addr: u16) {
+        self.read_cycle(addr);
     }
 
     // Out of line on purpose: inlining the whole bus cycle into every

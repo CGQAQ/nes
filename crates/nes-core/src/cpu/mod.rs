@@ -18,6 +18,12 @@ use serde::{Deserialize, Serialize};
 /// The CPU's view of the system bus. Each call is exactly one CPU cycle.
 pub trait CpuBus {
     fn read(&mut self, addr: u16) -> u8;
+    /// A read cycle whose value the CPU throws away. It must behave exactly
+    /// like [`CpuBus::read`] (register side effects included); the separate
+    /// entry point only lets debuggers ignore it.
+    fn dummy_read(&mut self, addr: u16) {
+        self.read(addr);
+    }
     fn write(&mut self, addr: u16, val: u8);
     /// Level of the (active-low on hardware) NMI line; `true` means asserted.
     fn nmi_line(&self) -> bool;
@@ -138,11 +144,11 @@ impl Cpu {
         // The real chip reads from PC here; reading the stack page instead
         // keeps the same timing without triggering register side effects.
         let sp = self.regs.sp;
-        self.read(bus, 0x0100 | sp as u16);
-        self.read(bus, 0x0100 | sp as u16);
+        self.dummy_read(bus, 0x0100 | sp as u16);
+        self.dummy_read(bus, 0x0100 | sp as u16);
         for _ in 0..3 {
             let sp = self.regs.sp;
-            self.read(bus, 0x0100 | sp as u16);
+            self.dummy_read(bus, 0x0100 | sp as u16);
             self.regs.sp = sp.wrapping_sub(1);
         }
         self.regs.p |= I;
@@ -155,7 +161,7 @@ impl Cpu {
     pub fn step<B: CpuBus>(&mut self, bus: &mut B) -> Step {
         if self.jammed {
             // The bus keeps running (and the PPU keeps drawing) while stuck.
-            self.read(bus, 0xFFFF);
+            self.dummy_read(bus, 0xFFFF);
             return Step::Jammed;
         }
         if self.interrupt_check && (self.prev_run_irq || self.prev_need_nmi) {
@@ -215,9 +221,16 @@ impl Cpu {
         u16::from_le_bytes([lo, hi])
     }
 
+    /// A read whose value the CPU discards (it still has side effects).
+    #[inline(always)]
+    fn dummy_read<B: CpuBus>(&mut self, bus: &mut B, addr: u16) {
+        bus.dummy_read(addr);
+        self.poll(bus);
+    }
+
     #[inline(always)]
     fn dummy_read_pc<B: CpuBus>(&mut self, bus: &mut B) {
-        self.read(bus, self.regs.pc);
+        self.dummy_read(bus, self.regs.pc);
     }
 
     #[inline(always)]
@@ -236,7 +249,7 @@ impl Cpu {
     /// The dummy stack read every pull instruction does before incrementing S.
     #[inline(always)]
     fn dummy_read_stack<B: CpuBus>(&mut self, bus: &mut B) {
-        self.read(bus, 0x0100 | self.regs.sp as u16);
+        self.dummy_read(bus, 0x0100 | self.regs.sp as u16);
     }
 
     // ---------------------------------------------------------------------
@@ -251,7 +264,7 @@ impl Cpu {
             Zp => self.fetch(bus) as u16,
             Zpx | Zpy => {
                 let base = self.fetch(bus);
-                self.read(bus, base as u16);
+                self.dummy_read(bus, base as u16);
                 let idx = if mode == Zpx {
                     self.regs.x
                 } else {
@@ -271,7 +284,7 @@ impl Cpu {
             }
             Izx => {
                 let ptr = self.fetch(bus);
-                self.read(bus, ptr as u16);
+                self.dummy_read(bus, ptr as u16);
                 let ptr = ptr.wrapping_add(self.regs.x);
                 let lo = self.read(bus, ptr as u16);
                 let hi = self.read(bus, ptr.wrapping_add(1) as u16);
@@ -292,7 +305,7 @@ impl Cpu {
     fn indexed<B: CpuBus>(&mut self, bus: &mut B, base: u16, idx: u8, write: bool) -> u16 {
         let addr = base.wrapping_add(idx as u16);
         if write || (addr ^ base) & 0xFF00 != 0 {
-            self.read(bus, (base & 0xFF00) | (addr & 0x00FF));
+            self.dummy_read(bus, (base & 0xFF00) | (addr & 0x00FF));
         }
         addr
     }
@@ -537,7 +550,7 @@ impl Cpu {
     /// replaces the high byte of the target address.
     fn sh_store<B: CpuBus>(&mut self, bus: &mut B, base: u16, idx: u8, val: u8) {
         let addr = base.wrapping_add(idx as u16);
-        self.read(bus, (base & 0xFF00) | (addr & 0x00FF));
+        self.dummy_read(bus, (base & 0xFF00) | (addr & 0x00FF));
         let v = val & ((base >> 8) as u8).wrapping_add(1);
         let target = if (addr ^ base) & 0xFF00 != 0 {
             ((v as u16) << 8) | (addr & 0x00FF)
@@ -570,13 +583,15 @@ impl Cpu {
         let pc = self.regs.pc;
         let target = pc.wrapping_add(offset as i16 as u16);
         if (target ^ pc) & 0xFF00 != 0 {
-            self.read(bus, (pc & 0xFF00) | (target & 0x00FF));
+            self.dummy_read(bus, (pc & 0xFF00) | (target & 0x00FF));
         }
         self.regs.pc = target;
     }
 
     fn brk<B: CpuBus>(&mut self, bus: &mut B) {
-        self.fetch(bus); // padding byte
+        // The padding byte after BRK is read and skipped.
+        self.dummy_read_pc(bus);
+        self.regs.pc = self.regs.pc.wrapping_add(1);
         let pc = self.regs.pc;
         self.push(bus, (pc >> 8) as u8);
         self.push(bus, pc as u8);
@@ -844,7 +859,9 @@ impl Cpu {
                 let lo = self.pull(bus);
                 let hi = self.pull(bus);
                 self.regs.pc = u16::from_le_bytes([lo, hi]);
-                self.fetch(bus);
+                // RTS pulls the return address minus one; skip that byte.
+                self.dummy_read_pc(bus);
+                self.regs.pc = self.regs.pc.wrapping_add(1);
             }
             0x40 => {
                 self.dummy_read_pc(bus);

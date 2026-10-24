@@ -7,6 +7,7 @@
 //! pixel per visible dot.
 
 pub mod palette;
+pub mod view;
 
 use crate::cart::{Cartridge, Mapper};
 use crate::region::Region;
