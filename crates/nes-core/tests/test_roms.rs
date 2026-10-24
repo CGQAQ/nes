@@ -45,11 +45,69 @@ fn check_screen(roms: &[(&str, u32, &str)]) {
             while nes.run_frame() != StopReason::FrameComplete {}
         }
         let text = testing::screen_text(&nes);
-        if !text.contains(expect) {
+        // `expect` may list several acceptable results separated by `|`
+        // (some tests' output legitimately depends on CPU/PPU alignment).
+        if !expect.split('|').any(|e| text.contains(e)) {
             failures.push(format!("{rel}: screen says {text:?}"));
         }
     }
     assert!(failures.is_empty(), "failed:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn mappers() {
+    check_blargg(&[
+        "mmc3_test_2/rom_singles/1-clocking.nes",
+        "mmc3_test_2/rom_singles/2-details.nes",
+        "mmc3_test_2/rom_singles/3-A12_clocking.nes",
+        "mmc3_test_2/rom_singles/4-scanline_timing.nes",
+        "mmc3_test_2/rom_singles/5-MMC3.nes",
+        "ppu_read_buffer/test_ppu_read_buffer.nes",
+    ]);
+    check_screen(&[
+        ("mmc3_irq_tests/1.Clocking.nes", 120, "PASSED"),
+        ("mmc3_irq_tests/2.Details.nes", 120, "PASSED"),
+        ("mmc3_irq_tests/3.A12_clocking.nes", 120, "PASSED"),
+        ("mmc3_irq_tests/4.Scanline_timing.nes", 120, "PASSED"),
+        ("mmc3_irq_tests/6.MMC3_rev_B.nes", 120, "PASSED"),
+    ]);
+}
+
+#[test]
+fn cpu_on_screen() {
+    check_screen(&[
+        ("cpu_dummy_reads/cpu_dummy_reads.nes", 120, "Passed"),
+        ("branch_timing_tests/1.Branch_Basics.nes", 120, "PASSED"),
+        ("branch_timing_tests/2.Backward_Branch.nes", 120, "PASSED"),
+        ("branch_timing_tests/3.Forward_Branch.nes", 120, "PASSED"),
+        ("cpu_timing_test6/cpu_timing_test.nes", 1300, "PASSED"),
+        ("blargg_nes_cpu_test5/cpu.nes", 1500, "All tests complete"),
+        (
+            "blargg_nes_cpu_test5/official.nes",
+            1500,
+            "All tests complete",
+        ),
+        ("read_joy3/thorough_test.nes", 600, "Passed"),
+    ]);
+}
+
+#[test]
+fn dma_conflicts() {
+    check_screen(&[
+        (
+            "dmc_dma_during_read4/dma_2007_read.nes",
+            120,
+            "159A7A8F|5E3DF9C4",
+        ),
+        ("dmc_dma_during_read4/dma_2007_write.nes", 120, "Passed"),
+        ("dmc_dma_during_read4/dma_4016_read.nes", 120, "Passed"),
+        (
+            "dmc_dma_during_read4/double_2007_read.nes",
+            120,
+            "85CFD627|F018C287|440EF923|E52F41A5",
+        ),
+        ("dmc_dma_during_read4/read_write_2007.nes", 120, "Passed"),
+    ]);
 }
 
 #[test]

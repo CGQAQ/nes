@@ -1,8 +1,16 @@
 //! Cartridge boards. Each mapper decides how the CPU and PPU address spaces
 //! map onto cartridge memory, and may add IRQs or expansion audio.
 
+mod discrete;
+mod mmc1;
+mod mmc2;
+mod mmc3;
 mod nrom;
 
+pub use discrete::Discrete;
+pub use mmc1::Mmc1;
+pub use mmc2::Mmc2;
+pub use mmc3::Mmc3;
 pub use nrom::Nrom;
 
 use super::board::{Board, Mirroring};
@@ -99,10 +107,17 @@ pub trait Mapper {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Cartridge {
     Nrom,
+    Discrete,
+    Mmc1,
+    Mmc2,
+    Mmc3,
 }
 
 /// Mapper numbers [`create`] accepts.
-pub const SUPPORTED_MAPPERS: &[u16] = &[0];
+pub const SUPPORTED_MAPPERS: &[u16] = &[
+    0, 1, 2, 3, 4, 7, 9, 10, 11, 13, 34, 38, 66, 70, 71, 78, 79, 87, 88, 89, 93, 94, 95, 113, 118,
+    119, 140, 146, 152, 154, 155, 180, 184, 185, 206,
+];
 
 pub fn create(rom: Rom) -> Result<Cartridge, RomError> {
     let info = rom.info.clone();
@@ -127,6 +142,27 @@ pub fn create(rom: Rom) -> Result<Cartridge, RomError> {
     let init = MapperInit { board, info };
     let cart: Cartridge = match init.info.mapper {
         0 => Nrom::new(init).into(),
+        1 | 155 => Mmc1::new(init).into(),
+        4 => {
+            let variant = match init.info.submapper {
+                1 => mmc3::Variant::Mmc6,
+                4 => mmc3::Variant::Mmc3A,
+                _ => mmc3::Variant::Mmc3,
+            };
+            Mmc3::new(init, variant).into()
+        }
+        9 => Mmc2::new(init, false).into(),
+        10 => Mmc2::new(init, true).into(),
+        88 => Mmc3::new(init, mmc3::Variant::Namco88).into(),
+        95 => Mmc3::new(init, mmc3::Variant::Namco95).into(),
+        118 => Mmc3::new(init, mmc3::Variant::TxSrom).into(),
+        119 => Mmc3::new(init, mmc3::Variant::Tqrom).into(),
+        154 => Mmc3::new(init, mmc3::Variant::Namco154).into(),
+        206 => Mmc3::new(init, mmc3::Variant::Namco108).into(),
+        m if discrete::Kind::from_mapper(m, init.info.chr_rom_size).is_some() => {
+            let kind = discrete::Kind::from_mapper(m, init.info.chr_rom_size).unwrap();
+            Discrete::new(init, kind).into()
+        }
         mapper => {
             return Err(RomError::UnsupportedMapper {
                 mapper,

@@ -50,6 +50,8 @@ pub struct Bus {
     /// CPU/PPU clock alignment in master clocks.
     ppu_offset: u64,
     dma: DmaState,
+    /// CPU cycle of the last read of each controller port.
+    input_read_cycle: [u64; 2],
     #[serde(skip)]
     pub dbg: Debugger,
     #[serde(skip)]
@@ -70,6 +72,7 @@ impl Bus {
             cycles: 0,
             ppu_offset: 1,
             dma: DmaState::default(),
+            input_read_cycle: [u64::MAX / 2; 2],
             dbg: Debugger::new(),
             cheats: Cheats::default(),
         }
@@ -159,7 +162,16 @@ impl Bus {
                 return (s & !0x20) | (self.open_bus & 0x20);
             }
             0x4016 | 0x4017 => {
-                let bit = self.input.read((addr & 1) as usize);
+                // The pad shifts when /OE is released, so reads on back-to-back
+                // cycles (DMA halt repeats) only clock it once.
+                let port = (addr & 1) as usize;
+                let held = self.cycles == self.input_read_cycle[port] + 1;
+                self.input_read_cycle[port] = self.cycles;
+                let bit = if held {
+                    self.input.peek(port)
+                } else {
+                    self.input.read(port)
+                };
                 (self.open_bus & INPUT_OPEN_BUS_MASK) | (bit & !INPUT_OPEN_BUS_MASK)
             }
             0x4000..=0x401F => self.open_bus,

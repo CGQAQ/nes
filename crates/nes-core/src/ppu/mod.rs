@@ -84,6 +84,10 @@ pub struct Ppu {
     pub scanline: i16,
     pub dot: u16,
     pub frame: u64,
+    /// Dots since power-on.
+    dots: u64,
+    /// `dots` at the last `$2007` read.
+    last_data_read: u64,
     /// Master clock this PPU has caught up to.
     master_clock: u64,
     prevent_vblank: bool,
@@ -152,6 +156,8 @@ impl Ppu {
             scanline: 0,
             dot: 0,
             frame: 0,
+            dots: 0,
+            last_data_read: u64::MAX / 2,
             master_clock: 0,
             prevent_vblank: false,
             skip_dot: false,
@@ -231,6 +237,7 @@ impl Ppu {
 
     /// Advances one dot.
     pub fn tick(&mut self, cart: &mut Cartridge) {
+        self.dots += 1;
         if self.dot >= 340 {
             self.dot = 0;
             self.scanline += 1;
@@ -705,6 +712,19 @@ impl Ppu {
                 r
             }
             7 => {
+                // A read on the cycle right after another (DMA halt repeats,
+                // indexed dummy reads) gets the previous value still on the
+                // data bus, but the buffer refill and increment still happen.
+                let back_to_back = self.dots.wrapping_sub(self.last_data_read) < 6;
+                self.last_data_read = self.dots;
+                if back_to_back {
+                    let stale = self.latch();
+                    let addr = self.v & 0x3FFF;
+                    self.read_buffer =
+                        cart.ppu_read(if addr >= 0x3F00 { addr - 0x1000 } else { addr });
+                    self.increment_v(cart);
+                    return stale;
+                }
                 let addr = self.v & 0x3FFF;
                 let r = if addr >= 0x3F00 {
                     let gray = if self.mask & mask::GRAY != 0 {
