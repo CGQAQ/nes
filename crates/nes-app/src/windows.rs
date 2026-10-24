@@ -40,6 +40,12 @@ fn key_label(k: Option<Key>) -> String {
 }
 
 impl SettingsWindow {
+    /// Opens the window on the controller bindings.
+    pub fn open_input(&mut self) {
+        self.open = true;
+        self.tab = SettingsTab::Input;
+    }
+
     /// Returns true if something visual or audible changed.
     pub fn show(&mut self, ctx: &egui::Context, settings: &mut Settings, input: &Input) -> bool {
         let mut changed = false;
@@ -98,6 +104,10 @@ impl SettingsWindow {
                 match self.tab {
                     SettingsTab::Input => self.input_tab(ui, settings, input),
                     SettingsTab::Video => {
+                        ui.checkbox(
+                            &mut settings.console_frame,
+                            "Show the console around the picture",
+                        );
                         changed |= ui
                             .checkbox(
                                 &mut settings.crop_overscan,

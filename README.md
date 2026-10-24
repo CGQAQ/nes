@@ -23,7 +23,10 @@ cargo run --release -p nes-app -- path/to/game.nes
 ```
 
 Or launch `nes` without arguments and drop a `.nes` (or `.zip`) file on the
-window. On Linux you need the usual GUI/audio/gamepad development packages
+window. The game plays on the screen of a drawn NES-style console: its POWER
+button opens a ROM (and power cycles once one is running), RESET resets, the
+controller ports light up while their buttons are held, and clicking a port
+opens its key bindings. Tools → Settings → Video hides the console. On Linux you need the usual GUI/audio/gamepad development packages
 (`libasound2-dev libudev-dev libxkbcommon-dev`).
 
 ### In the browser

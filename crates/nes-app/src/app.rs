@@ -1,6 +1,7 @@
 //! The application: menus, hotkeys, emulation pacing, and window layout.
 
 use crate::audio::Audio;
+use crate::console::{self, Led};
 use crate::debugger::DebugWindows;
 use crate::input::{self, Input};
 use crate::platform::{self, FileInbox, PickedFile, Store};
@@ -90,6 +91,7 @@ impl NesApp {
         let audio = Audio::new();
         audio.set_volume(if settings.muted { 0.0 } else { settings.volume });
         let palette = settings.palette(Region::Ntsc);
+        console::apply_theme(&cc.egui_ctx);
         let inbox = FileInbox::default();
         // Web: `?rom=<url>` loads a ROM, `?debug` opens the debugger.
         #[cfg(target_arch = "wasm32")]
@@ -149,6 +151,7 @@ impl NesApp {
     pub fn reset_layout(&mut self, ctx: &egui::Context) {
         self.debug = DebugWindows::default();
         ctx.memory_mut(|m| *m = Default::default());
+        console::apply_theme(ctx);
     }
 
     /// Command-line overrides for the debugger layout.
@@ -814,18 +817,6 @@ impl NesApp {
     }
 
     fn game_view(&mut self, ui: &mut egui::Ui) {
-        let rect = ui.max_rect();
-        ui.painter().rect_filled(rect, 0.0, Color32::BLACK);
-        let Some(tex) = &self.texture else {
-            ui.centered_and_justified(|ui| {
-                ui.label(
-                    RichText::new("Drop a .nes file here, or File → Open ROM… (Ctrl+O)")
-                        .size(18.0)
-                        .color(Color32::GRAY),
-                );
-            });
-            return;
-        };
         let lines = if self.settings.crop_overscan {
             224.0
         } else {
@@ -836,21 +827,109 @@ impl NesApp {
         } else {
             1.0
         };
-        let base = egui::vec2(256.0 * aspect, lines);
-        let avail = rect.size();
-        let mut scale = (avail.x / base.x).min(avail.y / base.y);
-        if self.settings.integer_scaling && scale >= 1.0 {
-            scale = scale.floor();
-        }
-        let size = base * scale;
-        let img_rect = egui::Rect::from_center_size(rect.center(), size);
+        let picture = egui::vec2(256.0 * aspect, lines);
+        let rect = if self.settings.console_frame {
+            let front = console::Front {
+                led: match &self.session {
+                    None => Led::Off,
+                    Some(s) if s.running() => Led::On,
+                    Some(_) => Led::Dim,
+                },
+                active: self.pads.map(|p| p.0 != 0),
+            };
+            let (screen, controls) =
+                console::show(ui, picture, self.settings.integer_scaling, &front);
+            self.front_panel(ui.ctx(), controls);
+            screen
+        } else {
+            let area = ui.max_rect();
+            ui.painter().rect_filled(area, 0.0, Color32::BLACK);
+            let scale = console::fit(area.size(), picture, self.settings.integer_scaling);
+            egui::Rect::from_center_size(area.center(), picture * scale)
+        };
+        let painter = ui.painter();
+
+        let Some(tex) = &self.texture else {
+            let size = (rect.height() * 0.035).clamp(10.0, 18.0);
+            if self.settings.console_frame {
+                painter.text(
+                    rect.center() - egui::vec2(0.0, size),
+                    egui::Align2::CENTER_BOTTOM,
+                    "INSERT CARTRIDGE",
+                    egui::FontId::monospace(size * 1.6),
+                    Color32::from_gray(210),
+                );
+                painter.text(
+                    rect.center() + egui::vec2(0.0, size * 0.5),
+                    egui::Align2::CENTER_TOP,
+                    "Drop a .nes file here, or press POWER to open one",
+                    egui::FontId::proportional(size),
+                    Color32::GRAY,
+                );
+            } else {
+                painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Drop a .nes file here, or File → Open ROM… (Ctrl+O)",
+                    egui::FontId::proportional(size),
+                    Color32::GRAY,
+                );
+            }
+            return;
+        };
         let v0 = if self.settings.crop_overscan {
             8.0 / 240.0
         } else {
             0.0
         };
         let uv = egui::Rect::from_min_max(egui::pos2(0.0, v0), egui::pos2(1.0, 1.0 - v0));
-        ui.painter().image(tex.id(), img_rect, uv, Color32::WHITE);
+        painter.image(tex.id(), rect, uv, Color32::WHITE);
+
+        if let Some(s) = &self.session
+            && s.paused
+            && s.stopped.is_none()
+        {
+            let size = (rect.height() * 0.04).clamp(11.0, 22.0);
+            let text = painter.layout_no_wrap(
+                "PAUSED".into(),
+                egui::FontId::monospace(size),
+                Color32::WHITE,
+            );
+            let pad = egui::vec2(size * 0.6, size * 0.3);
+            let badge = egui::Rect::from_min_size(
+                egui::pos2(
+                    rect.right() - size * 0.6 - text.size().x - 2.0 * pad.x,
+                    rect.top() + size * 0.6,
+                ),
+                text.size() + 2.0 * pad,
+            );
+            painter.rect_filled(badge, 3.0, Color32::from_black_alpha(170));
+            painter.galley(badge.min + pad, text, Color32::WHITE);
+        }
+    }
+
+    /// Handles clicks on the console's POWER and RESET buttons and
+    /// controller ports.
+    fn front_panel(&mut self, ctx: &egui::Context, controls: console::Controls) {
+        let loaded = self.session.is_some();
+        let power_tip = if loaded {
+            format!("Power cycle ({})", ctx.format_shortcut(&POWER))
+        } else {
+            format!("Open a ROM ({})", ctx.format_shortcut(&OPEN))
+        };
+        if controls.power.on_hover_text(power_tip).clicked() {
+            self.perform(if loaded { Action::Power } else { Action::Open });
+        }
+        let reset_tip = format!("Reset ({})", ctx.format_shortcut(&RESET));
+        if controls.reset.on_hover_text(reset_tip).clicked() {
+            self.perform(Action::Reset);
+        }
+        for (n, port) in controls.ports.into_iter().enumerate() {
+            let tip = format!("Controller {}: click to change its buttons", n + 1);
+            if port.on_hover_text(tip).clicked() {
+                self.settings_window.open_input();
+            }
+        }
     }
 
     fn about_window(&mut self, ctx: &egui::Context) {

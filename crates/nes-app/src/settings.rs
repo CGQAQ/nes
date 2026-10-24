@@ -51,6 +51,8 @@ pub struct Settings {
     /// Target audio latency in milliseconds.
     pub audio_latency_ms: u32,
 
+    /// Draw the console around the picture.
+    pub console_frame: bool,
     pub integer_scaling: bool,
     pub crop_overscan: bool,
     /// Show pixels with the NTSC 8:7 pixel aspect ratio.
@@ -82,6 +84,7 @@ impl Default for Settings {
             volume: 0.8,
             muted: false,
             audio_latency_ms: 60,
+            console_frame: true,
             integer_scaling: false,
             crop_overscan: true,
             pixel_aspect: true,
