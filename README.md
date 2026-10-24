@@ -16,7 +16,9 @@ Windows, macOS and Linux, and in the browser.
 
 ## Running
 
-Requires stable Rust (1.88+).
+Prebuilt `nes` and `nes-cli` binaries for Windows, macOS and Linux are on
+the [Releases](https://github.com/CGQAQ/nes/releases) page. To build from
+source you need stable Rust (1.88+).
 
 ```sh
 cargo run --release -p nes-app -- path/to/game.nes
@@ -99,6 +101,16 @@ nes-cli compat-report            # regenerates docs/compat.md
 
 `run` prints hashes of the final frame and of all audio produced, which makes
 it easy to check that a change is output-neutral.
+
+## Releasing
+
+Bump `version` in the workspace `Cargo.toml`, run `cargo check` so
+`Cargo.lock` picks it up, commit both, then push a matching tag. The Release
+workflow builds every platform and publishes the release:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
 
 ## Testing
 
