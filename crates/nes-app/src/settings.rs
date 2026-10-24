@@ -9,16 +9,18 @@ use serde::{Deserialize, Serialize};
 pub struct PadKeys(pub [Option<Key>; 8]);
 
 impl PadKeys {
+    /// WASD for the D-pad; J/K are B/A (B on the left, as on the pad), L is
+    /// Select and O Start. Turbo B/A sit above on U/I.
     pub fn player1() -> Self {
         PadKeys([
-            Some(Key::X),
-            Some(Key::Z),
-            Some(Key::Space),
-            Some(Key::Enter),
-            Some(Key::ArrowUp),
-            Some(Key::ArrowDown),
-            Some(Key::ArrowLeft),
-            Some(Key::ArrowRight),
+            Some(Key::K),
+            Some(Key::J),
+            Some(Key::L),
+            Some(Key::O),
+            Some(Key::W),
+            Some(Key::S),
+            Some(Key::A),
+            Some(Key::D),
         ])
     }
 
@@ -64,13 +66,17 @@ pub struct Settings {
 
     pub recent_roms: Vec<String>,
     pub state_slot: u8,
+    /// Which default key layout these settings were saved with; see
+    /// [`Settings::migrate`].
+    #[serde(default)]
+    pub bindings_version: u32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             keys: [PadKeys::player1(), PadKeys::none()],
-            turbo_keys: [[Some(Key::S), Some(Key::A)], [None, None]],
+            turbo_keys: [[Some(Key::I), Some(Key::U)], [None, None]],
             gamepads_enabled: true,
             allow_opposite_directions: false,
             volume: 0.8,
@@ -87,11 +93,36 @@ impl Default for Settings {
             rewind_seconds: 30,
             recent_roms: Vec::new(),
             state_slot: 1,
+            bindings_version: BINDINGS_VERSION,
         }
     }
 }
 
+/// Bumped when the default key layout changes.
+const BINDINGS_VERSION: u32 = 1;
+
 impl Settings {
+    /// Brings settings saved by an older version up to date. Player 1 keys
+    /// still on the old default layout (arrows, X/Z, Enter/Space, turbo S/A)
+    /// move to the current one; customized bindings are left alone.
+    pub fn migrate(&mut self) {
+        if self.bindings_version < 1 {
+            use Key::*;
+            let old = PadKeys(
+                [
+                    X, Z, Space, Enter, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+                ]
+                .map(Some),
+            );
+            if self.keys[0] == old && self.turbo_keys[0] == [Some(S), Some(A)] {
+                let d = Settings::default();
+                self.keys[0] = d.keys[0].clone();
+                self.turbo_keys[0] = d.turbo_keys[0];
+            }
+        }
+        self.bindings_version = BINDINGS_VERSION;
+    }
+
     pub fn add_recent(&mut self, path: String) {
         self.recent_roms.retain(|p| p != &path);
         self.recent_roms.insert(0, path);
@@ -120,3 +151,56 @@ pub const BUTTON_ORDER: [u8; 8] = [
     Buttons::LEFT,
     Buttons::RIGHT,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn saved_by_old_version() -> Settings {
+        use Key::*;
+        Settings {
+            keys: [
+                PadKeys(
+                    [
+                        X, Z, Space, Enter, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+                    ]
+                    .map(Some),
+                ),
+                PadKeys::none(),
+            ],
+            turbo_keys: [[Some(S), Some(A)], [None, None]],
+            bindings_version: 0,
+            ..Settings::default()
+        }
+    }
+
+    #[test]
+    fn old_default_keys_move_to_the_new_layout() {
+        let mut s = saved_by_old_version();
+        s.migrate();
+        assert_eq!(s.keys, Settings::default().keys);
+        assert_eq!(s.turbo_keys, Settings::default().turbo_keys);
+    }
+
+    #[test]
+    fn customized_keys_are_kept() {
+        let mut s = saved_by_old_version();
+        s.keys[0].0[0] = Some(Key::C);
+        let keys = s.keys.clone();
+        s.migrate();
+        assert_eq!(s.keys, keys);
+
+        // Once migrated, choosing the old layout again sticks.
+        let mut s = saved_by_old_version();
+        s.bindings_version = BINDINGS_VERSION;
+        let keys = s.keys.clone();
+        s.migrate();
+        assert_eq!(s.keys, keys);
+    }
+
+    #[test]
+    fn missing_version_reads_as_old() {
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.bindings_version, 0);
+    }
+}
