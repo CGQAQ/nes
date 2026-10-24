@@ -1,0 +1,25 @@
+[package]
+name = "nes-core"
+description = "Cycle-accurate NES emulation core: CPU, PPU, APU, cartridges, debugger hooks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+postcard.workspace = true
+lz4_flex.workspace = true
+crc32fast.workspace = true
+enum_dispatch.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

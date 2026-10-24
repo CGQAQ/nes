@@ -1,0 +1,19 @@
+[package]
+name = "nes-app"
+description = "NES emulator and debugger GUI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nes"
+path = "src/main.rs"
+
+[dependencies]
+nes-core.workspace = true
+
+[lints]
+workspace = true

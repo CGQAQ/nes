@@ -1,0 +1,20 @@
+[package]
+name = "nes-cli"
+description = "Headless NES runner: screenshots, traces, test ROMs, benchmarks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+nes-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+png.workspace = true
+env_logger.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true
