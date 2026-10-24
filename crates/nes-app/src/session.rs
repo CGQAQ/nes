@@ -147,3 +147,53 @@ impl Session {
         self.last_saved_ram = self.nes.save_data();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An NROM image that just spins in a loop.
+    fn spin_rom() -> Vec<u8> {
+        let mut rom = vec![b'N', b'E', b'S', 0x1A, 1, 1, 0, 0];
+        rom.resize(16, 0);
+        let mut prg = vec![0xEA; 0x4000];
+        prg[0] = 0x4C; // JMP $C000
+        prg[1] = 0x00;
+        prg[2] = 0xC0;
+        prg[0x3FFC] = 0x00;
+        prg[0x3FFD] = 0xC0;
+        rom.extend(prg);
+        rom.extend(vec![0; 0x2000]);
+        rom
+    }
+
+    #[test]
+    fn rewind_goes_back_in_time() {
+        let mut s = Session::load("spin.nes", &spin_rom(), None, 48_000.0).unwrap();
+        for _ in 0..120 {
+            assert!(s.run_frame(Some(30)));
+        }
+        let before = s.nes.frame();
+        assert!(s.rewind_len_seconds() > 1.9);
+        for _ in 0..20 {
+            assert!(s.rewind_step());
+        }
+        assert!(s.nes.frame() < before - 20, "{} vs {before}", s.nes.frame());
+    }
+
+    #[test]
+    fn rewind_history_is_bounded() {
+        let mut s = Session::load("spin.nes", &spin_rom(), None, 48_000.0).unwrap();
+        for _ in 0..600 {
+            s.run_frame(Some(2));
+        }
+        assert!(s.rewind_len_seconds() <= 2.1, "{}", s.rewind_len_seconds());
+    }
+
+    #[test]
+    fn save_ids_are_stable() {
+        let s = Session::load("Some Game (U).nes", &spin_rom(), None, 48_000.0).unwrap();
+        assert!(s.id.starts_with("Some Game (U)-"));
+        assert_eq!(s.state_key(3), format!("states/{}-3.state", s.id));
+    }
+}

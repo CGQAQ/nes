@@ -215,7 +215,10 @@ impl DebugWindows {
     /// Floating viewer windows.
     pub fn show_windows(&mut self, ctx: &egui::Context, s: &mut Session, palette: &Palette) {
         let refresh = std::mem::take(&mut self.frame_needs_refresh) || !s.running();
-        let origin = ctx.content_rect().left_top();
+        // Spread the viewers out: PPU top-left, APU top-right, cartridge in between.
+        let area = ctx.content_rect();
+        let origin = area.left_top();
+        let right = (area.width() - 560.0).max(40.0);
         if self.ppu {
             let mut open = true;
             egui::Window::new("PPU viewer")
@@ -232,7 +235,7 @@ impl DebugWindows {
             egui::Window::new("APU viewer")
                 .open(&mut open)
                 .default_size([520.0, 480.0])
-                .default_pos(origin + egui::vec2(80.0, 80.0))
+                .default_pos(origin + egui::vec2(right, 40.0))
                 .show(ctx, |ui| apu::ui(ui, s));
             self.apu = open;
         }
@@ -241,7 +244,7 @@ impl DebugWindows {
             egui::Window::new("Cartridge")
                 .open(&mut open)
                 .default_width(360.0)
-                .default_pos(origin + egui::vec2(140.0, 120.0))
+                .default_pos(origin + egui::vec2((right / 2.0).max(60.0), 140.0))
                 .show(ctx, |ui| cart::ui(ui, s));
             self.cart = open;
         }
