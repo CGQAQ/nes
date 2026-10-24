@@ -1,0 +1,7 @@
+/target
+/test-data
+/dist
+*.sav
+*.state
+.DS_Store
+/.idea
