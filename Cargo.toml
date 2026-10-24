@@ -29,7 +29,15 @@ png = "0.18.1"
 serde_json = "1.0.154"
 env_logger = "0.11.11"
 
-eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+# x11/wayland give winit a windowing backend on Linux (no-ops elsewhere).
+eframe = { version = "0.37.0", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "persistence",
+    "x11",
+    "wayland",
+    "clipboard",
+] }
 egui = "0.37.0"
 cpal = "0.18.2"
 gilrs = "0.11.2"
