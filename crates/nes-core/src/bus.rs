@@ -11,6 +11,7 @@
 //! of the repeated CPU reads they cause.
 
 use crate::apu::Apu;
+use crate::cart::mapper::Hooks;
 use crate::cart::{Cartridge, Mapper};
 use crate::cheats::Cheats;
 use crate::cpu::CpuBus;
@@ -50,6 +51,9 @@ pub struct Bus {
     /// CPU/PPU clock alignment in master clocks.
     ppu_offset: u64,
     dma: DmaState,
+    /// Derived from the cartridge type; recomputed after loading a state.
+    #[serde(skip)]
+    hooks: Hooks,
     /// CPU cycle of the last read of each controller port.
     input_read_cycle: [u64; 2],
     #[serde(skip)]
@@ -60,6 +64,7 @@ pub struct Bus {
 
 impl Bus {
     pub fn new(region: Region, cart: Cartridge, sample_rate: f64) -> Self {
+        let hooks = cart.hooks();
         Self {
             region,
             ram: vec![0; 0x800],
@@ -72,6 +77,7 @@ impl Bus {
             cycles: 0,
             ppu_offset: 1,
             dma: DmaState::default(),
+            hooks,
             input_read_cycle: [u64::MAX / 2; 2],
             dbg: Debugger::new(),
             cheats: Cheats::default(),
@@ -85,6 +91,7 @@ impl Bus {
     /// Moves the parts that aren't saved in states (debugger, cheats) from
     /// the old bus into this one after loading.
     pub(crate) fn adopt_unsaved(&mut self, old: &mut Bus) {
+        self.hooks = self.cart.hooks();
         std::mem::swap(&mut self.dbg, &mut old.dbg);
         std::mem::swap(&mut self.cheats, &mut old.cheats);
         self.ppu.take_framebuffer_from(&mut old.ppu);
@@ -113,9 +120,15 @@ impl Bus {
         self.cycles += 1;
         let target = self.ppu_target();
         self.ppu.run_until(target, &mut self.cart);
-        let expansion = self.cart.expansion_audio();
+        let expansion = if self.hooks.audio {
+            self.cart.expansion_audio()
+        } else {
+            0.0
+        };
         self.apu.tick(expansion);
-        self.cart.cpu_clock();
+        if self.hooks.clocked {
+            self.cart.cpu_clock();
+        }
         if self.apu.dmc.dma_pending {
             self.apu.dmc.dma_pending = false;
             self.start_dmc_dma();
@@ -447,6 +460,6 @@ impl CpuBus for Bus {
 
     #[inline]
     fn irq_line(&self) -> bool {
-        self.apu.irq_line() || self.cart.irq()
+        self.apu.irq_line() || (self.hooks.clocked && self.cart.irq())
     }
 }

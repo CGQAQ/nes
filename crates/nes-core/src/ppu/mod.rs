@@ -19,6 +19,11 @@ pub const HEIGHT: usize = 240;
 /// Frames an unrefreshed open-bus bit takes to decay to 0 (about 0.6 s).
 const OPEN_BUS_DECAY_FRAMES: u64 = 36;
 
+// `spr_line` entry bits: 0-1 pixel, 2-3 palette, then flags.
+const SPR_BEHIND: u8 = 0x10;
+const SPR_ZERO: u8 = 0x20;
+const SPR_PRESENT: u8 = 0x80;
+
 mod ctrl {
     pub const NT: u8 = 0x03;
     pub const INC32: u8 = 0x04;
@@ -122,8 +127,17 @@ pub struct Ppu {
     fetch_y: u8,
     fetch_tile: u8,
 
+    /// Sprite pixels for `spr_line_for`, rebuilt lazily (not saved).
+    #[serde(skip)]
+    spr_line: Vec<u8>,
+    #[serde(skip, default = "invalid_line")]
+    spr_line_for: i16,
     #[serde(skip, default = "blank_frame")]
     framebuffer: Vec<u16>,
+}
+
+fn invalid_line() -> i16 {
+    i16::MIN
 }
 
 fn blank_frame() -> Vec<u16> {
@@ -182,6 +196,8 @@ impl Ppu {
             next_zero: false,
             fetch_y: 0xFF,
             fetch_tile: 0xFF,
+            spr_line: Vec::new(),
+            spr_line_for: invalid_line(),
             framebuffer: blank_frame(),
         }
     }
@@ -412,6 +428,42 @@ impl Ppu {
         }
     }
 
+    /// Draws this line's sprite units into `spr_line` once, so per-pixel
+    /// output is a lookup. The units can't change during the visible part of
+    /// a line (they're reloaded at dots 257-320), so this is exact.
+    fn rasterize_sprites(&mut self) {
+        self.spr_line.clear();
+        self.spr_line.resize(WIDTH, 0);
+        // Back to front, so the lowest-numbered opaque sprite wins.
+        for i in (0..self.spr_count as usize).rev() {
+            let (lo, hi, attr, x0) = (
+                self.spr_lo[i],
+                self.spr_hi[i],
+                self.spr_attr[i],
+                self.spr_x[i],
+            );
+            let mut flags = SPR_PRESENT | ((attr & 3) << 2);
+            if attr & 0x20 != 0 {
+                flags |= SPR_BEHIND;
+            }
+            if i == 0 && self.spr_zero {
+                flags |= SPR_ZERO;
+            }
+            for col in 0..8 {
+                let x = x0 as usize + col;
+                if x >= WIDTH {
+                    break;
+                }
+                let shift = 7 - col;
+                let p = ((hi >> shift) & 1) << 1 | ((lo >> shift) & 1);
+                if p != 0 {
+                    self.spr_line[x] = flags | p;
+                }
+            }
+        }
+        self.spr_line_for = self.scanline;
+    }
+
     fn output_pixel(&mut self, x: usize) {
         let m = self.mask;
         let mut bg = 0u8;
@@ -425,22 +477,16 @@ impl Ppu {
         let mut spr = 0u8;
         let mut spr_attr = 0u8;
         if m & mask::SPR != 0 && (x >= 8 || m & mask::SPR_LEFT != 0) {
-            for i in 0..self.spr_count as usize {
-                let off = (x as u8).wrapping_sub(self.spr_x[i]);
-                if off >= 8 || (x as u16) < self.spr_x[i] as u16 {
-                    continue;
-                }
-                let shift = 7 - off;
-                let p = ((self.spr_hi[i] >> shift) & 1) << 1 | ((self.spr_lo[i] >> shift) & 1);
-                if p == 0 {
-                    continue;
-                }
-                if i == 0 && self.spr_zero && bg != 0 && x != 255 {
+            if self.spr_line_for != self.scanline {
+                self.rasterize_sprites();
+            }
+            let px = self.spr_line[x];
+            if px & SPR_PRESENT != 0 {
+                if px & SPR_ZERO != 0 && bg != 0 && x != 255 {
                     self.sprite0_hit = true;
                 }
-                spr = p;
-                spr_attr = self.spr_attr[i];
-                break;
+                spr = px & 3;
+                spr_attr = ((px >> 2) & 3) | if px & SPR_BEHIND != 0 { 0x20 } else { 0 };
             }
         }
 
@@ -563,6 +609,7 @@ impl Ppu {
             0 => {
                 if slot == 0 {
                     self.spr_count = self.next_count;
+                    self.spr_line_for = invalid_line();
                     self.spr_zero = self.next_zero;
                 }
                 self.fetch_y = self.secondary_oam[base];

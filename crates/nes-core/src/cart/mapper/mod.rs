@@ -146,6 +146,29 @@ pub enum Cartridge {
     Multicart,
 }
 
+/// Which per-cycle hooks a board actually uses, so the bus can skip the
+/// dispatch for the rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hooks {
+    /// `cpu_clock` and `irq` matter.
+    pub clocked: bool,
+    /// `expansion_audio` matters.
+    pub audio: bool,
+}
+
+impl Cartridge {
+    pub fn hooks(&self) -> Hooks {
+        use Cartridge::*;
+        Hooks {
+            clocked: !matches!(
+                self,
+                Nrom(_) | Discrete(_) | Mmc2(_) | Multicart(_) | Vrc1(_)
+            ),
+            audio: matches!(self, Mmc5(_) | Vrc6(_) | Vrc7(_) | Fme7(_) | Namco163(_)),
+        }
+    }
+}
+
 /// Mapper numbers [`create`] accepts.
 pub const SUPPORTED_MAPPERS: &[u16] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 16, 18, 19, 21, 22, 23, 24, 25, 26, 28, 30, 32, 33, 34, 38,

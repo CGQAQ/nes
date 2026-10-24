@@ -217,6 +217,9 @@ fn main() -> Result<()> {
                 None => None,
             };
             let mut seq = 0;
+            // FNV-1a over the audio output, to check changes are bit-exact.
+            let mut audio_hash: u64 = 0xcbf2_9ce4_8422_2325;
+            let mut samples = Vec::new();
             for f in 0..frames {
                 let mut b = Buttons::default();
                 for (start, end, pb) in &presses {
@@ -232,6 +235,12 @@ fn main() -> Result<()> {
                         StopReason::StepDone => {}
                     }
                 }
+                nes.drain_audio(&mut samples);
+                for s in samples.drain(..) {
+                    for byte in s.to_bits().to_le_bytes() {
+                        audio_hash = (audio_hash ^ byte as u64).wrapping_mul(0x0100_0000_01b3);
+                    }
+                }
                 if let Some(out) = trace_out.as_mut() {
                     for e in nes.bus.dbg.trace.since(seq) {
                         writeln!(out, "{}", e.nestest_line())?;
@@ -239,6 +248,10 @@ fn main() -> Result<()> {
                     seq = nes.bus.dbg.trace.total();
                 }
             }
+            println!(
+                "frame hash {:016x}, audio hash {audio_hash:016x}",
+                nes_core::testing::frame_hash(&nes)
+            );
             if let Some(p) = screenshot {
                 write_png(&nes, &p)?;
                 println!("wrote {}", p.display());
