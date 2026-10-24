@@ -163,9 +163,11 @@ impl Apu {
             scope: empty_scope(),
             scope_pos: 0,
         };
-        // Power-up behaves as if $4017 were written with 0 just before the
-        // reset vector is fetched.
-        apu.write_frame_counter(0);
+        // Power-up behaves as if $4017 were written with 0 about 10 cycles
+        // before the first instruction: the sequencer starts right away, and
+        // the CPU's 7-cycle reset sequence follows.
+        apu.frame.pending = None;
+        apu.frame.cycle = 0;
         apu
     }
 
@@ -417,8 +419,8 @@ mod tests {
             cycles += 1;
             assert!(cycles < 40_000);
         }
-        // 3-4 cycles of $4017 write delay plus 29828.
-        assert!((29_830..=29_833).contains(&cycles), "{cycles}");
+        // The sequencer starts at power-up, so the first IRQ is at step 4.
+        assert_eq!(cycles, 29_828);
     }
 
     #[test]

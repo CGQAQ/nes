@@ -79,18 +79,29 @@ impl NesApp {
             .storage
             .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
             .unwrap_or_default();
-        let debug = cc
+        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+        let mut debug: DebugWindows = cc
             .storage
             .and_then(|s| eframe::get_value(s, crate::debugger::STORAGE_KEY))
             .unwrap_or_default();
         let audio = Audio::new();
         audio.set_volume(if settings.muted { 0.0 } else { settings.volume });
         let palette = settings.palette(Region::Ntsc);
+        let inbox = FileInbox::default();
+        // Web: `?rom=<url>` loads a ROM, `?debug` opens the debugger.
+        #[cfg(target_arch = "wasm32")]
+        for (key, value) in platform::page_params() {
+            match key.as_str() {
+                "rom" if !value.is_empty() => platform::fetch_rom(value, &inbox),
+                "debug" => debug.docked = true,
+                _ => {}
+            }
+        }
         Self {
             store: Store::new(cc.storage),
             audio,
             input: Input::new(),
-            inbox: FileInbox::default(),
+            inbox,
             session: None,
             texture: None,
             rgba: Vec::new(),
@@ -130,12 +141,14 @@ impl NesApp {
     }
 
     /// Forgets remembered window positions and debugger layout.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn reset_layout(&mut self, ctx: &egui::Context) {
         self.debug = DebugWindows::default();
         ctx.memory_mut(|m| *m = Default::default());
     }
 
     /// Command-line overrides for the debugger layout.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn show_debugger(&mut self, panels: bool, viewers: bool) {
         if panels {
             self.debug.docked = true;

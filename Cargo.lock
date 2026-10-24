@@ -1450,6 +1450,7 @@ dependencies = [
  "egui",
  "env_logger",
  "gilrs",
+ "js-sys",
  "log",
  "nes-core",
  "png",

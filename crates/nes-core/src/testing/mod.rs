@@ -5,6 +5,8 @@
 //! result code with 0 meaning pass), `$6001-$6003` hold the signature
 //! `DE B0 61`, and `$6004` onward a NUL-terminated message.
 
+pub mod suite;
+
 use crate::{Nes, StopReason};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

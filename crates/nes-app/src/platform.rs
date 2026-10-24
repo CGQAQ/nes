@@ -80,6 +80,65 @@ pub fn read_dropped(file: egui::DroppedFileHandle, inbox: &FileInbox) {
     }
 }
 
+/// Query-string parameters of the page (`?rom=...&debug`), web only.
+#[cfg(target_arch = "wasm32")]
+pub fn page_params() -> Vec<(String, String)> {
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let (k, v) = p.split_once('=').unwrap_or((p, ""));
+            let decode = |s: &str| {
+                js_sys::decode_uri_component(&s.replace('+', " "))
+                    .ok()
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_else(|| s.to_string())
+            };
+            (decode(k), decode(v))
+        })
+        .collect()
+}
+
+/// Downloads a ROM from `url` into the inbox (web only: `?rom=<url>`).
+#[cfg(target_arch = "wasm32")]
+pub fn fetch_rom(url: String, inbox: &FileInbox) {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    let inbox = inbox.clone();
+    spawn_task(async move {
+        let result: Result<Vec<u8>, String> = async {
+            let window = web_sys::window().ok_or("no window")?;
+            let resp = JsFuture::from(window.fetch_with_str(&url))
+                .await
+                .map_err(|e| format!("{e:?}"))?;
+            let resp: web_sys::Response = resp.dyn_into().map_err(|e| format!("{e:?}"))?;
+            if !resp.ok() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            let buf = JsFuture::from(resp.array_buffer().map_err(|e| format!("{e:?}"))?)
+                .await
+                .map_err(|e| format!("{e:?}"))?;
+            Ok(js_sys::Uint8Array::new(&buf).to_vec())
+        }
+        .await;
+        match result {
+            Ok(data) => {
+                let name = url.rsplit('/').next().unwrap_or("rom.nes").to_string();
+                inbox.deliver(PickedFile {
+                    name,
+                    path: None,
+                    data,
+                });
+            }
+            Err(e) => log::error!("fetching {url}: {e}"),
+        }
+    });
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn spawn_task(fut: impl std::future::Future<Output = ()> + Send + 'static) {
     std::thread::spawn(move || pollster_block_on(fut));
