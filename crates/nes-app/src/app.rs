@@ -2,13 +2,13 @@
 
 use crate::audio::Audio;
 use crate::debugger::DebugWindows;
-use crate::input::Input;
+use crate::input::{self, Input};
 use crate::platform::{self, FileInbox, PickedFile, Store};
 use crate::session::Session;
 use crate::settings::Settings;
 use crate::windows::{CheatsWindow, SettingsWindow};
 use egui::{Color32, Key, KeyboardShortcut, Modifiers, RichText};
-use nes_core::{Palette, Region};
+use nes_core::{Buttons, Palette, Region};
 use web_time::Instant;
 
 const SETTINGS_KEY: &str = "settings";
@@ -51,6 +51,8 @@ pub struct NesApp {
     /// (message, expiry).
     toast: Option<(String, Instant)>,
     error: Option<String>,
+    /// Controller state sent to the console this frame, for the status bar.
+    pads: [Buttons; 2],
     fast_forward: bool,
     rewinding: bool,
     speed: f32,
@@ -75,10 +77,11 @@ struct Capture {
 
 impl NesApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let settings: Settings = cc
+        let mut settings: Settings = cc
             .storage
             .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
             .unwrap_or_default();
+        settings.migrate();
         #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
         let mut debug: DebugWindows = cc
             .storage
@@ -113,6 +116,7 @@ impl NesApp {
             fps_since: None,
             toast: None,
             error: None,
+            pads: Default::default(),
             fast_forward: false,
             rewinding: false,
             speed: 1.0,
@@ -352,7 +356,7 @@ impl NesApp {
     // Input.
 
     fn handle_hotkeys(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() {
+        if !input::keyboard_free(ctx) {
             return;
         }
         let mut actions = Vec::new();
@@ -488,9 +492,10 @@ impl NesApp {
             return;
         };
 
-        let keyboard = !ctx.egui_wants_keyboard_input();
+        let keyboard = input::keyboard_free(ctx);
         let frame = session.nes.frame();
         let pads = self.input.poll(ctx, &self.settings, keyboard, frame);
+        self.pads = pads;
         // Any input means a user gesture happened; browsers need one before
         // audio may start.
         if pads.iter().any(|p| p.0 != 0) || ctx.input(|i| !i.events.is_empty()) {
@@ -776,6 +781,17 @@ impl NesApp {
                     } else {
                         ui.label(format!("{:.1} fps", self.fps));
                     }
+                    for (port, pad) in self.pads.iter().enumerate() {
+                        if pad.0 != 0 {
+                            let names: Vec<&str> = Buttons::NAMES
+                                .iter()
+                                .filter(|(_, bit)| pad.pressed(*bit))
+                                .map(|(name, _)| *name)
+                                .collect();
+                            ui.separator();
+                            ui.label(format!("P{} {}", port + 1, names.join(" ")));
+                        }
+                    }
                 }
                 None => {
                     ui.label("No ROM loaded");
@@ -847,10 +863,10 @@ impl NesApp {
                 ui.add_space(6.0);
                 egui::Grid::new("controls").striped(true).show(ui, |ui| {
                     for (k, v) in [
-                        ("Arrows", "D-pad"),
-                        ("X / Z", "A / B"),
-                        ("S / A", "Turbo A / Turbo B"),
-                        ("Enter / Space", "Start / Select"),
+                        ("W / A / S / D", "D-pad"),
+                        ("K / J", "A / B"),
+                        ("I / U", "Turbo A / Turbo B"),
+                        ("O / L", "Start / Select"),
                         ("Esc", "Pause / resume"),
                         (".", "Frame advance"),
                         ("Tab (hold)", "Fast forward"),
@@ -913,6 +929,7 @@ impl eframe::App for NesApp {
             self.open_file(file);
         }
 
+        input::release_widget_focus(&ctx);
         self.handle_hotkeys(&ctx);
         self.emulate(&ctx);
 

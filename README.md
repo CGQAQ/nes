@@ -42,10 +42,10 @@ opens the debugger. Saves and settings live in the browser's local storage.
 
 | Key | Action |
 |---|---|
-| Arrows | D-pad |
-| X / Z | A / B |
-| S / A | Turbo A / turbo B |
-| Enter / Space | Start / Select |
+| W / A / S / D | D-pad |
+| K / J | A / B |
+| I / U | Turbo A / turbo B |
+| O / L | Start / Select |
 | Esc | Pause / resume |
 | . | Frame advance |
 | Tab (hold) | Fast-forward |
