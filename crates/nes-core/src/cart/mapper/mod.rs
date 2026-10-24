@@ -1,17 +1,38 @@
 //! Cartridge boards. Each mapper decides how the CPU and PPU address spaces
 //! map onto cartridge memory, and may add IRQs or expansion audio.
 
+mod bandai;
 mod discrete;
+mod fme7;
+mod jp_misc;
 mod mmc1;
 mod mmc2;
 mod mmc3;
+mod mmc5;
+mod multicart;
+mod namco163;
 mod nrom;
+mod rambo1;
+mod vrc2_4;
+mod vrc6;
+mod vrc_irq;
+mod vrc_other;
 
+pub use bandai::Bandai;
 pub use discrete::Discrete;
+pub use fme7::Fme7;
+pub use jp_misc::JpMisc;
 pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;
 pub use mmc3::Mmc3;
+pub use mmc5::Mmc5;
+pub use multicart::Multicart;
+pub use namco163::Namco163;
 pub use nrom::Nrom;
+pub use rambo1::Rambo1;
+pub use vrc_other::{Vrc1, Vrc3, Vrc7};
+pub use vrc2_4::Vrc24;
+pub use vrc6::Vrc6;
 
 use super::board::{Board, Mirroring};
 use super::ines::{Rom, RomError, RomInfo};
@@ -111,12 +132,25 @@ pub enum Cartridge {
     Mmc1,
     Mmc2,
     Mmc3,
+    Mmc5,
+    Vrc24,
+    Vrc6,
+    Vrc7,
+    Vrc1,
+    Vrc3,
+    Fme7,
+    Namco163,
+    Bandai,
+    JpMisc,
+    Rambo1,
+    Multicart,
 }
 
 /// Mapper numbers [`create`] accepts.
 pub const SUPPORTED_MAPPERS: &[u16] = &[
-    0, 1, 2, 3, 4, 7, 9, 10, 11, 13, 34, 38, 66, 70, 71, 78, 79, 87, 88, 89, 93, 94, 95, 113, 118,
-    119, 140, 146, 152, 154, 155, 180, 184, 185, 206,
+    0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 16, 18, 19, 21, 22, 23, 24, 25, 26, 28, 30, 32, 33, 34, 38,
+    48, 64, 65, 66, 68, 69, 70, 71, 73, 75, 78, 79, 80, 85, 87, 88, 89, 93, 94, 95, 113, 118, 119,
+    140, 146, 152, 153, 154, 155, 159, 180, 184, 185, 206, 207, 210, 228, 232,
 ];
 
 pub fn create(rom: Rom) -> Result<Cartridge, RomError> {
@@ -159,6 +193,24 @@ pub fn create(rom: Rom) -> Result<Cartridge, RomError> {
         119 => Mmc3::new(init, mmc3::Variant::Tqrom).into(),
         154 => Mmc3::new(init, mmc3::Variant::Namco154).into(),
         206 => Mmc3::new(init, mmc3::Variant::Namco108).into(),
+        5 => Mmc5::new(init).into(),
+        16 | 153 | 159 => Bandai::new(init).into(),
+        19 | 210 => Namco163::new(init).into(),
+        21 | 22 | 23 | 25 => Vrc24::new(init).into(),
+        24 | 26 => Vrc6::new(init).into(),
+        28 => Multicart::new(init, multicart::Kind::Action53).into(),
+        30 => Multicart::new(init, multicart::Kind::Unrom512).into(),
+        64 => Rambo1::new(init).into(),
+        69 => Fme7::new(init).into(),
+        73 => Vrc3::new(init).into(),
+        75 => Vrc1::new(init).into(),
+        85 => Vrc7::new(init).into(),
+        228 => Multicart::new(init, multicart::Kind::Action52).into(),
+        232 => Multicart::new(init, multicart::Kind::Quattro).into(),
+        m if jp_misc::Kind::from_mapper(m).is_some() => {
+            let kind = jp_misc::Kind::from_mapper(m).unwrap();
+            JpMisc::new(init, kind).into()
+        }
         m if discrete::Kind::from_mapper(m, init.info.chr_rom_size).is_some() => {
             let kind = discrete::Kind::from_mapper(m, init.info.chr_rom_size).unwrap();
             Discrete::new(init, kind).into()

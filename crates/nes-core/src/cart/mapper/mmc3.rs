@@ -272,10 +272,11 @@ impl Mapper for Mmc3 {
     fn cpu_write(&mut self, addr: u16, val: u8) {
         if addr < 0x8000 {
             if self.variant == Variant::Mmc6 {
-                if let Some((i, read, write)) = self.mmc6_ram_access(addr) {
-                    if read && write {
-                        self.board.prg_ram[i] = val;
-                    }
+                if let Some((i, read, write)) = self.mmc6_ram_access(addr)
+                    && read
+                    && write
+                {
+                    self.board.prg_ram[i] = val;
                 }
             } else {
                 self.board.write_prg(addr, val);

@@ -4,6 +4,7 @@ pub mod board;
 mod db;
 pub mod ines;
 pub mod mapper;
+mod opll;
 
 pub use board::{Board, Mirroring};
 pub use ines::{ConsoleType, HeaderFormat, Rom, RomError, RomInfo};
